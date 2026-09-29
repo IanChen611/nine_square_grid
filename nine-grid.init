@@ -1,0 +1,47 @@
+#!/bin/sh
+# =============================================================
+#  開機腳本：安裝到 /usr/local/etc/init.d/S99nine-grid
+#    sudo cp nine-grid.init /usr/local/etc/init.d/S99nine-grid
+#    sudo chmod +x /usr/local/etc/init.d/S99nine-grid
+#  （update.sh 每次更新都會自動重新安裝這支，保持同步）
+#
+#  用法：S99nine-grid start | stop | restart | status
+# =============================================================
+APP_DIR=/volume1/home/ian/nine_square_grid
+LOG="$APP_DIR/app.log"
+# 用含資料夾名稱的路徑比對，才不會誤殺 Stock_Recrod 的 server.js
+LOOP_PAT=nine_square_grid/start-native.sh
+NODE_PAT=nine_square_grid/server.js
+
+running() { pgrep -f "$LOOP_PAT" >/dev/null 2>&1; }
+
+start() {
+  if running; then
+    echo "已經在執行中"
+    return 0
+  fi
+  echo "$(date '+%F %T') --- 服務啟動（$(id -un)）" >> "$LOG"
+  # setsid：開一個新的 session，sudo / SSH 結束時才不會把背景程式一起帶走
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup sh "$APP_DIR/start-native.sh" </dev/null >/dev/null 2>&1 &
+  else
+    nohup sh "$APP_DIR/start-native.sh" </dev/null >/dev/null 2>&1 &
+  fi
+  sleep 1
+  if running; then echo "已啟動"; else echo "啟動失敗，請看 $LOG"; return 1; fi
+}
+
+stop() {
+  echo "$(date '+%F %T') --- 服務停止" >> "$LOG"
+  pkill -f "$LOOP_PAT" 2>/dev/null   # 先停外層的自動重開迴圈
+  pkill -f "$NODE_PAT" 2>/dev/null   # 再停 node
+  sleep 1
+}
+
+case "$1" in
+  ""|start) start ;;
+  stop)     stop ;;
+  restart)  stop; start ;;
+  status)   if running; then echo "執行中"; else echo "沒有在執行"; fi ;;
+  *)        echo "用法：$0 {start|stop|restart|status}"; exit 1 ;;
+esac

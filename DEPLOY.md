@@ -48,36 +48,23 @@ PORT=8081 ../Stock_Recrod/.node/bin/node server.js
 
 ## 第四步：開機自動啟動 + 當掉自動重開
 
-1. 建立開機腳本：
+1. 安裝開機腳本（專案裡的 [`nine-grid.init`](nine-grid.init)）並啟動：
 
    ```bash
-   sudo vi /usr/local/etc/init.d/S99nine-grid
-   ```
-
-   貼入：
-
-   ```sh
-   #!/bin/sh
-   APP=/volume1/home/ian/nine_square_grid/start-native.sh
-   case "$1" in
-     ""|start) nohup sh "$APP" >/dev/null 2>&1 & ;;
-     stop)     pkill -f nine_square_grid/start-native.sh; pkill -f nine_square_grid/server.js ;;
-   esac
-   ```
-
-   > ⚠️ **不要**用 `pkill -f server.js` —— Stock_Recrod 的後端也叫 `server.js`，會被一起砍掉。
-   > 上面用含資料夾名稱的完整路徑比對，只會停掉這個遊戲。
-
-2. 給執行權限並啟動：
-
-   ```bash
+   cd /volume1/home/ian/nine_square_grid
+   sudo cp nine-grid.init /usr/local/etc/init.d/S99nine-grid
    sudo chmod +x /usr/local/etc/init.d/S99nine-grid
    sudo /usr/local/etc/init.d/S99nine-grid start
    ```
 
-3. 確認：
+   > 它用 `setsid` 讓服務脫離 SSH / sudo 的 session，登出後也不會被帶走；
+   > 停止時只比對 `nine_square_grid/` 路徑，不會誤殺 Stock_Recrod 的 `server.js`。
+   > 之後每次 `update.sh` 都會自動重新安裝這支腳本。
+
+2. 確認：
 
    ```bash
+   sudo /usr/local/etc/init.d/S99nine-grid status
    tail -f /volume1/home/ian/nine_square_grid/app.log
    ```
 
@@ -101,6 +88,7 @@ PORT=8081 ../Stock_Recrod/.node/bin/node server.js
 
 ```bash
 sudo /usr/local/etc/init.d/S99nine-grid start   # 啟動
+sudo /usr/local/etc/init.d/S99nine-grid status  # 有沒有在跑
 sudo /usr/local/etc/init.d/S99nine-grid stop    # 停止
 tail -f /volume1/home/ian/nine_square_grid/app.log
 
