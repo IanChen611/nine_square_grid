@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>九九宮格</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%AD%95%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7385;
+    --line: #d4d8e2;
+    --big-line: #1d2330;
+    --x: #2f6fed;
+    --o: #e5484d;
+    --allowed: #fff4c2;
+    --allowed-strong: #ffe27a;
+    --win: #b8f0c8;
+    --btn: #1d2330;
+    --btn-text: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c;
+      --panel: #1b2029;
+      --text: #e8ebf2;
+      --muted: #9aa3b5;
+      --line: #394150;
+      --big-line: #c9cfdb;
+      --x: #6b9bff;
+      --o: #ff6b70;
+      --allowed: #3a3520;
+      --allowed-strong: #5e5320;
+      --win: #1f5a33;
+      --btn: #e8ebf2;
+      --btn-text: #12151c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    min-height: 100vh;
+    padding: 16px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap { max-width: 600px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 4px 0 12px; text-align: center; }
+  .panel {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    margin-bottom: 12px;
+  }
+  label { display: block; font-size: .9rem; color: var(--muted); margin-bottom: 6px; }
+  input {
+    width: 100%; font-size: 1.05rem; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; min-width: 0; }
+  button {
+    font: inherit; font-size: 1rem; padding: 10px 14px; border-radius: 10px; border: 0;
+    background: var(--btn); color: var(--btn-text); cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  .or { text-align: center; color: var(--muted); margin: 14px 0; font-size: .9rem; }
+  .rules { font-size: .9rem; color: var(--muted); line-height: 1.6; }
+  .rules b { color: var(--text); }
+  .hidden { display: none !important; }
+
+  /* 玩家列 */
+  .players { display: flex; gap: 8px; margin-bottom: 10px; }
+  .player {
+    flex: 1; background: var(--panel); border-radius: 12px; padding: 8px 10px;
+    border: 2px solid transparent; display: flex; align-items: center; gap: 8px; min-width: 0;
+  }
+  .player.turn { border-color: currentColor; }
+  .player.X { color: var(--x); }
+  .player.O { color: var(--o); }
+  .player .mark { font-weight: 800; font-size: 1.4rem; width: 1.2em; text-align: center; }
+  .player .info { color: var(--text); min-width: 0; }
+  .player .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .player .sub { font-size: .78rem; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #9aa3b5; margin-right: 4px; }
+  .dot.on { background: #2fbf71; }
+
+  .status { text-align: center; font-weight: 600; min-height: 1.5em; margin: 6px 0 10px; }
+
+  /* 棋盤 */
+  .board {
+    width: min(100%, 560px); aspect-ratio: 1; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 4px;
+    background: var(--big-line); border: 4px solid var(--big-line); border-radius: 10px;
+  }
+  .big {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 1px; min-width: 0; min-height: 0;
+    background: var(--line); transition: background .15s;
+  }
+  .cell {
+    background: var(--panel); border: 0; border-radius: 0; padding: 0; margin: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: clamp(14px, 5vw, 30px); font-weight: 800; line-height: 1; color: var(--text);
+    cursor: default; min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden;
+  }
+  .big.allowed .cell { background: var(--allowed); }
+  .big.allowed.mine .cell:not(:disabled) { background: var(--allowed-strong); cursor: pointer; }
+  .cell.X { color: var(--x); }
+  .cell.O { color: var(--o); }
+  .cell.last { box-shadow: inset 0 0 0 3px currentColor; }
+  .cell.win { background: var(--win) !important; }
+  .cell:disabled { opacity: 1; }
+
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .actions button { flex: 1; min-width: 120px; }
+  .share { display: flex; gap: 8px; align-items: center; font-size: .9rem; color: var(--muted); margin-bottom: 10px; }
+  .share code { background: var(--panel); padding: 4px 8px; border-radius: 6px; color: var(--text); font-size: 1.05rem; letter-spacing: .1em; }
+  .share button { flex: 0 0 auto; padding: 6px 10px; font-size: .9rem; }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: var(--btn); color: var(--btn-text); padding: 10px 16px; border-radius: 10px;
+    font-size: .95rem; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px);
+  }
+  .toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>九九宮格</h1>
+
+  <!-- 大廳 -->
+  <section id="lobby" class="hidden">
+    <div class="panel">
+      <label for="name">你的暱稱</label>
+      <input id="name" maxlength="16" placeholder="例如：翊揚">
+      <div style="height:12px"></div>
+      <button id="create" style="width:100%">建立新房間</button>
+      <div class="or">或輸入朋友給你的房號</div>
+      <div class="row">
+        <input id="code" maxlength="8" placeholder="房號" autocapitalize="characters" style="text-transform:uppercase">
+        <button id="joinBtn" style="flex:0 0 auto">加入</button>
+      </div>
+    </div>
+    <div class="panel rules">
+      <b>玩法</b><br>
+      1. 棋盤是 9 個大格，每個大格裡面是一個小九宮格。<br>
+      2. 你下在小九宮格的<b>哪個位置</b>，對手下一步就只能下在<b>同位置的大格</b>。
+      例如你下在某小格的「左上」，對手就只能下在「左上」那個大格裡。<br>
+      3. 若被指定的大格已經下滿，就可以任選大格。<br>
+      4. <b>先在任何一個小九宮格內連成一線</b>（橫、直、斜）的人獲勝！
+    </div>
+  </section>
+
+  <!-- 對戰 -->
+  <section id="game" class="hidden">
+    <div class="share">
+      房號 <code id="roomCode"></code>
+      <button class="ghost" id="copy">複製邀請連結</button>
+      <span id="spectators" style="margin-left:auto"></span>
+    </div>
+    <div class="players">
+      <div class="player X" id="pX"></div>
+      <div class="player O" id="pO"></div>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="board" id="board"></div>
+    <div class="actions">
+      <button id="restart" class="ghost">重新開始</button>
+      <button id="sit" class="ghost hidden">入座</button>
+      <button id="leave" class="ghost">離開房間</button>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  var POS = ['左上', '上', '右上', '左', '中間', '右', '左下', '下', '右下'];
+  var $ = function (id) { return document.getElementById(id); };
+
+  function store(key, val) {
+    try {
+      if (val === undefined) return localStorage.getItem(key);
+      localStorage.setItem(key, val);
+    } catch (e) { return null; }
+  }
+  // 每台裝置一個固定身分（http 下不能用 crypto.randomUUID）
+  var token = store('nsg-token');
+  if (!token) {
+    token = '';
+    for (var i = 0; i < 24; i++) token += 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)];
+    store('nsg-token', token);
+  }
+
+  var params = new URLSearchParams(location.search);
+  var roomId = (params.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var mySeat = null;
+  var state = null;
+  var es = null;
+
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { t.classList.remove('show'); }, 2200);
+  }
+
+  function api(action, data) {
+    data = data || {};
+    data.room = roomId;
+    data.token = token;
+    return fetch('/api/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error(j.error || '發生錯誤');
+        return j;
+      });
+    });
+  }
+
+  // ---------- 大廳 ----------
+  function showLobby() {
+    $('lobby').classList.remove('hidden');
+    $('game').classList.add('hidden');
+    $('name').value = store('nsg-name') || '';
+  }
+
+  function randomCode() {
+    var s = '', chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    for (var i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+
+  function goRoom(code) {
+    var name = $('name').value.trim();
+    if (!name) { toast('先輸入暱稱'); $('name').focus(); return; }
+    store('nsg-name', name);
+    location.search = '?room=' + code;
+  }
+
+  $('create').onclick = function () { goRoom(randomCode()); };
+  $('joinBtn').onclick = function () {
+    var code = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!code) { toast('請輸入房號'); return; }
+    goRoom(code);
+  };
+  $('code').onkeydown = function (e) { if (e.key === 'Enter') $('joinBtn').click(); };
+
+  // ---------- 對戰 ----------
+  function enterRoom() {
+    var name = store('nsg-name');
+    if (!name) {
+      // 第一次從邀請連結進來：先填暱稱，房號幫他帶好
+      showLobby();
+      $('code').value = roomId;
+      $('name').focus();
+      return;
+    }
+    $('lobby').classList.add('hidden');
+    $('game').classList.remove('hidden');
+    $('roomCode').textContent = roomId;
+    buildBoard();
+    sit(name).then(connect, connect);
+  }
+
+  function sit(name) {
+    return api('join', { name: name || store('nsg-name') || '' }).then(function (r) {
+      mySeat = r.seat;
+      if (!mySeat) toast('目前沒有空位，先觀戰（離線玩家的座位保留 1 分鐘）');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function connect() {
+    if (es) es.close();
+    es = new EventSource('/api/events?room=' + encodeURIComponent(roomId) + '&token=' + encodeURIComponent(token));
+    es.onmessage = function (ev) {
+      state = JSON.parse(ev.data);
+      render();
+    };
+    es.onerror = function () { $('status').textContent = '連線中斷，重新連線中…'; };
+  }
+
+  var cells = [];
+  var bigs = [];
+  function buildBoard() {
+    var board = $('board');
+    board.innerHTML = '';
+    for (var b = 0; b < 9; b++) {
+      var big = document.createElement('div');
+      big.className = 'big';
+      for (var s = 0; s < 9; s++) {
+        var c = document.createElement('button');
+        c.className = 'cell';
+        c.dataset.big = b;
+        c.dataset.small = s;
+        c.setAttribute('aria-label', POS[b] + '大格・' + POS[s]);
+        c.onclick = onCell;
+        big.appendChild(c);
+        cells[b * 9 + s] = c;
+      }
+      board.appendChild(big);
+      bigs[b] = big;
+    }
+  }
+
+  function onCell(e) {
+    var big = Number(e.currentTarget.dataset.big);
+    var small = Number(e.currentTarget.dataset.small);
+    api('move', { big: big, small: small }).catch(function (err) { toast(err.message); });
+  }
+
+  function playerHtml(mark) {
+    var p = state.seats[mark];
+    var me = mySeat === mark ? '（你）' : '';
+    if (!p) return '<span class="mark">' + mark + '</span><div class="info"><div class="name">等待加入…</div><div class="sub">空位</div></div>';
+    return '<span class="mark">' + mark + '</span><div class="info"><div class="name">' + escapeHtml(p.name) + me +
+      '</div><div class="sub"><span class="dot' + (p.online ? ' on' : '') + '"></span>' + (p.online ? '在線' : '離線') + '</div></div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+    });
+  }
+
+  function render() {
+    var st = state;
+    mySeat = st.you; // 以伺服器為準（座位可能被讓出或換人）
+
+    ['X', 'O'].forEach(function (m) {
+      var el = $('p' + m);
+      el.innerHTML = playerHtml(m);
+      el.classList.toggle('turn', !st.winner && st.turn === m && !!st.seats.X && !!st.seats.O);
+    });
+    $('spectators').textContent = st.spectators ? '觀戰 ' + st.spectators + ' 人' : '';
+
+    var ready = st.seats.X && st.seats.O;
+    var myTurn = ready && !st.winner && mySeat === st.turn;
+    var winSet = {};
+    if (st.winLine) st.winLine.cells.forEach(function (c) { winSet[st.winLine.big * 9 + c] = true; });
+
+    for (var b = 0; b < 9; b++) {
+      var allowed = ready && !st.winner && (st.forced === null || st.forced === b);
+      bigs[b].classList.toggle('allowed', allowed);
+      bigs[b].classList.toggle('mine', allowed && myTurn);
+      for (var s = 0; s < 9; s++) {
+        var i = b * 9 + s, c = cells[i], v = st.board[i];
+        c.textContent = v === 'X' ? '✕' : v === 'O' ? '◯' : '';
+        c.className = 'cell' + (v ? ' ' + v : '') + (winSet[i] ? ' win' : '') +
+          (st.lastMove && st.lastMove.big === b && st.lastMove.small === s ? ' last' : '');
+        c.disabled = !(myTurn && allowed && !v);
+      }
+    }
+
+    var msg;
+    if (!ready) {
+      msg = '等待另一位玩家加入…把房號或邀請連結傳給朋友';
+    } else if (st.winner === 'draw') {
+      msg = '平手！棋盤下滿了';
+    } else if (st.winner) {
+      var wname = st.seats[st.winner].name;
+      msg = st.winner === mySeat ? '🎉 你贏了！' : mySeat ? '你輸了，' + wname + ' 獲勝' : wname + '（' + st.winner + '）獲勝！';
+    } else {
+      var where = st.forced === null ? '任一大格' : '「' + POS[st.forced] + '」大格';
+      if (myTurn) msg = '輪到你了，請下在' + where;
+      else msg = st.seats[st.turn].name + '（' + st.turn + '）思考中… 要下在' + where;
+    }
+    $('status').textContent = msg;
+
+    $('restart').classList.toggle('hidden', !mySeat);
+    $('restart').textContent = st.winner ? '再來一局' : '重新開始';
+    var canSit = !mySeat && (!st.seats.X || !st.seats.O || !st.seats.X.online || !st.seats.O.online);
+    $('sit').classList.toggle('hidden', !canSit);
+    $('leave').textContent = mySeat ? '離開座位' : '回大廳';
+  }
+
+  $('restart').onclick = function () {
+    if (state && !state.winner && state.moveCount > 0 && !confirm('這局還沒結束，確定要重新開始？')) return;
+    api('restart').catch(function (e) { toast(e.message); });
+  };
+  $('sit').onclick = function () { sit().then(function () { if (state) render(); }); };
+  $('leave').onclick = function () {
+    if (mySeat) {
+      if (!confirm('確定要離開座位？（這局會重置）')) return;
+      api('leave').finally(function () { location.search = ''; });
+    } else {
+      location.search = '';
+    }
+  };
+  $('copy').onclick = function () {
+    var link = location.origin + location.pathname + '?room=' + roomId;
+    var done = function () { toast('已複製：' + link); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(link).then(done, function () { prompt('複製這個連結：', link); });
+    } else {
+      prompt('複製這個連結：', link);
+    }
+  };
+
+  if (roomId) enterRoom(); else showLobby();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "nine-square-grid",
+  "version": "1.0.0",
+  "description": "九九宮格（Ultimate Tic-Tac-Toe 變體）雙人連線對戰，零相依套件",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
