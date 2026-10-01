@@ -13,8 +13,8 @@
     --muted: #6b7385;
     --line: #d4d8e2;
     --big-line: #1d2330;
-    --x: #2f6fed;
-    --o: #e5484d;
+    --x-base: #2f6fed;
+    --o-base: #e5484d;
     --allowed: #fff4c2;
     --allowed-strong: #ffe27a;
     --win: #b8f0c8;
@@ -29,8 +29,8 @@
       --muted: #9aa3b5;
       --line: #394150;
       --big-line: #c9cfdb;
-      --x: #6b9bff;
-      --o: #ff6b70;
+      --x-base: #6b9bff;
+      --o-base: #ff6b70;
       --allowed: #3a3520;
       --allowed-strong: #5e5320;
       --win: #1f5a33;
@@ -38,6 +38,9 @@
       --btn-text: #12151c;
     }
   }
+  /* 圈叉互換（只影響自己的畫面）：把 X / O 的顏色對調 */
+  body { --x: var(--x-base); --o: var(--o-base); }
+  body.flip { --x: var(--o-base); --o: var(--x-base); }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
@@ -71,6 +74,7 @@
   }
   button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
   button:disabled { opacity: .45; cursor: default; }
+  button.ghost[aria-pressed="true"] { border-color: var(--text); font-weight: 600; }
   .or { text-align: center; color: var(--muted); margin: 14px 0; font-size: .9rem; }
   .rules { font-size: .9rem; color: var(--muted); line-height: 1.6; }
   .rules b { color: var(--text); }
@@ -201,6 +205,7 @@
       <div class="actions">
         <button id="restart" class="ghost">重新開始</button>
         <button id="sit" class="ghost hidden">入座</button>
+        <button id="flip" class="ghost" aria-pressed="false">⇄ 圈叉互換</button>
         <button id="leave" class="ghost">離開房間</button>
       </div>
     </div>
@@ -239,6 +244,7 @@
   var params = new URLSearchParams(location.search);
   var roomId = (params.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   var mySeat = null;
+  var flip = store('nsg-flip') === '1'; // 圈叉互換：只改顯示，伺服器仍用原本的 X / O
   var state = null;
   var es = null;
 
@@ -358,11 +364,19 @@
     api('move', { big: big, small: small }).catch(function (err) { toast(err.message); });
   }
 
+  // 伺服器的 X / O → 畫面上顯示的 X / O
+  function shown(m) { return flip ? (m === 'X' ? 'O' : 'X') : m; }
+
+  function applyFlip() {
+    document.body.classList.toggle('flip', flip);
+    $('flip').setAttribute('aria-pressed', String(flip));
+  }
+
   function playerHtml(mark) {
     var p = state.seats[mark];
     var me = mySeat === mark ? '（你）' : '';
-    if (!p) return '<span class="mark">' + mark + '</span><div class="info"><div class="name">等待加入…</div><div class="sub">空位</div></div>';
-    return '<span class="mark">' + mark + '</span><div class="info"><div class="name">' + escapeHtml(p.name) + me +
+    if (!p) return '<span class="mark">' + shown(mark) + '</span><div class="info"><div class="name">等待加入…</div><div class="sub">空位</div></div>';
+    return '<span class="mark">' + shown(mark) + '</span><div class="info"><div class="name">' + escapeHtml(p.name) + me +
       '</div><div class="sub"><span class="dot' + (p.online ? ' on' : '') + '"></span>' + (p.online ? '在線' : '離線') + '</div></div>';
   }
 
@@ -394,7 +408,7 @@
       bigs[b].classList.toggle('mine', allowed && myTurn);
       for (var s = 0; s < 9; s++) {
         var i = b * 9 + s, c = cells[i], v = st.board[i];
-        c.textContent = v === 'X' ? '✕' : v === 'O' ? '◯' : '';
+        c.textContent = !v ? '' : shown(v) === 'X' ? '✕' : '◯';
         c.className = 'cell' + (v ? ' ' + v : '') + (winSet[i] ? ' win' : '') +
           (st.lastMove && st.lastMove.big === b && st.lastMove.small === s ? ' last' : '');
         c.disabled = !(myTurn && allowed && !v);
@@ -408,11 +422,11 @@
       msg = '平手！棋盤下滿了';
     } else if (st.winner) {
       var wname = st.seats[st.winner].name;
-      msg = st.winner === mySeat ? '🎉 你贏了！' : mySeat ? '你輸了，' + wname + ' 獲勝' : wname + '（' + st.winner + '）獲勝！';
+      msg = st.winner === mySeat ? '🎉 你贏了！' : mySeat ? '你輸了，' + wname + ' 獲勝' : wname + '（' + shown(st.winner) + '）獲勝！';
     } else {
       var where = st.forced === null ? '任一大格' : '「' + POS[st.forced] + '」大格';
       if (myTurn) msg = '輪到你了，請下在' + where;
-      else msg = st.seats[st.turn].name + '（' + st.turn + '）思考中… 要下在' + where;
+      else msg = st.seats[st.turn].name + '（' + shown(st.turn) + '）思考中… 要下在' + where;
     }
     $('status').textContent = msg;
 
@@ -422,6 +436,15 @@
     $('sit').classList.toggle('hidden', !canSit);
     $('leave').textContent = mySeat ? '離開座位' : '回大廳';
   }
+
+  $('flip').onclick = function () {
+    flip = !flip;
+    store('nsg-flip', flip ? '1' : '0');
+    applyFlip();
+    if (state) render();
+    toast('已互換圈叉（只影響你的畫面）');
+  };
+  applyFlip();
 
   $('restart').onclick = function () {
     if (state && !state.winner && state.moveCount > 0 && !confirm('這局還沒結束，確定要重新開始？')) return;
