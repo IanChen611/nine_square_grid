@@ -49,6 +49,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .wrap { max-width: 600px; margin: 0 auto; }
+  #lobby { max-width: 600px; margin: 0 auto; }
   h1 { font-size: 1.5rem; margin: 4px 0 12px; text-align: center; }
   .panel {
     background: var(--panel);
@@ -128,6 +129,32 @@
     font-size: .95rem; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px);
   }
   .toast.show { opacity: .95; }
+
+  /* 聊天室 */
+  .chat { margin-top: 12px; padding: 12px; }
+  .chat-title { font-size: .9rem; color: var(--muted); margin-bottom: 8px; }
+  .chat-list {
+    height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+    font-size: .95rem; line-height: 1.4; padding-right: 4px; overscroll-behavior: contain;
+  }
+  .chat-empty { color: var(--muted); font-size: .9rem; margin: auto; }
+  .msg { word-break: break-word; }
+  .msg .who { font-weight: 700; margin-right: 6px; }
+  .msg .who.X { color: var(--x); }
+  .msg .who.O { color: var(--o); }
+  .msg .who.spec { color: var(--muted); }
+  .msg .time { font-size: .75rem; color: var(--muted); margin-left: 6px; }
+  .chat-form { display: flex; gap: 8px; margin-top: 10px; }
+  .chat-form input { flex: 1; min-width: 0; font-size: 1rem; padding: 8px 10px; }
+  .chat-form button { flex: 0 0 auto; padding: 8px 14px; }
+
+  /* 寬螢幕：聊天室放在棋盤右側，高度跟左邊對齊；窄螢幕維持在棋盤下方 */
+  @media (min-width: 900px) {
+    .wrap { max-width: 940px; }
+    #game { display: grid; grid-template-columns: minmax(0, 600px) 300px; gap: 16px; justify-content: center; }
+    .chat { margin: 0; display: flex; flex-direction: column; min-height: 320px; }
+    .chat-list { flex: 1 1 auto; height: 0; }
+  }
 </style>
 </head>
 <body>
@@ -159,22 +186,32 @@
 
   <!-- 對戰 -->
   <section id="game" class="hidden">
-    <div class="share">
-      房號 <code id="roomCode"></code>
-      <button class="ghost" id="copy">複製邀請連結</button>
-      <span id="spectators" style="margin-left:auto"></span>
+    <div class="game-main">
+      <div class="share">
+        房號 <code id="roomCode"></code>
+        <button class="ghost" id="copy">複製邀請連結</button>
+        <span id="spectators" style="margin-left:auto"></span>
+      </div>
+      <div class="players">
+        <div class="player X" id="pX"></div>
+        <div class="player O" id="pO"></div>
+      </div>
+      <div class="status" id="status"></div>
+      <div class="board" id="board"></div>
+      <div class="actions">
+        <button id="restart" class="ghost">重新開始</button>
+        <button id="sit" class="ghost hidden">入座</button>
+        <button id="leave" class="ghost">離開房間</button>
+      </div>
     </div>
-    <div class="players">
-      <div class="player X" id="pX"></div>
-      <div class="player O" id="pO"></div>
-    </div>
-    <div class="status" id="status"></div>
-    <div class="board" id="board"></div>
-    <div class="actions">
-      <button id="restart" class="ghost">重新開始</button>
-      <button id="sit" class="ghost hidden">入座</button>
-      <button id="leave" class="ghost">離開房間</button>
-    </div>
+    <aside class="panel chat">
+      <div class="chat-title">💬 聊天室</div>
+      <div class="chat-list" id="chatList" aria-live="polite"><div class="chat-empty">還沒有訊息，打聲招呼吧！</div></div>
+      <form class="chat-form" id="chatForm" autocomplete="off">
+        <input id="chatInput" maxlength="200" placeholder="輸入訊息…" enterkeyhint="send">
+        <button type="submit">送出</button>
+      </form>
+    </aside>
   </section>
 </div>
 <div class="toast" id="toast"></div>
@@ -288,6 +325,7 @@
       state = JSON.parse(ev.data);
       render();
     };
+    es.addEventListener('chat', function (ev) { onChat(JSON.parse(ev.data)); });
     es.onerror = function () { $('status').textContent = '連線中斷，重新連線中…'; };
   }
 
@@ -406,6 +444,52 @@
     } else {
       prompt('複製這個連結：', link);
     }
+  };
+
+  // ---------- 聊天室 ----------
+  var chatIds = {};
+  var unread = 0;
+  var baseTitle = document.title;
+
+  function onChat(data) {
+    var list = $('chatList');
+    if (data.reset) { list.innerHTML = ''; chatIds = {}; }
+    var atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    data.messages.forEach(function (m) {
+      if (chatIds[m.id]) return;
+      chatIds[m.id] = true;
+      var empty = list.querySelector('.chat-empty');
+      if (empty) empty.remove();
+      var d = new Date(m.at);
+      var time = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+      var el = document.createElement('div');
+      el.className = 'msg';
+      el.innerHTML = '<span class="who ' + (m.seat || 'spec') + '">' + escapeHtml(m.name) + (m.seat ? '' : '（觀戰）') +
+        '</span>' + escapeHtml(m.text) + '<span class="time">' + time + '</span>';
+      list.appendChild(el);
+      if (!data.reset && document.hidden) unread++;
+    });
+    if (!list.children.length) list.innerHTML = '<div class="chat-empty">還沒有訊息，打聲招呼吧！</div>';
+    if (data.reset || atBottom) list.scrollTop = list.scrollHeight;
+    document.title = unread ? '(' + unread + ') ' + baseTitle : baseTitle;
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { unread = 0; document.title = baseTitle; }
+  });
+
+  $('chatForm').onsubmit = function (e) {
+    e.preventDefault();
+    var input = $('chatInput');
+    var text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    api('chat', { text: text, name: store('nsg-name') || '' }).then(function () {
+      $('chatList').scrollTop = $('chatList').scrollHeight;
+    }, function (err) {
+      if (!input.value) input.value = text; // 送失敗就把字放回去
+      toast(err.message);
+    });
   };
 
   if (roomId) enterRoom(); else showLobby();

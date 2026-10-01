@@ -4,7 +4,7 @@
 //  - 零相依套件：只用 Node 內建模組，NAS 上不用 npm install
 //  - 相容 Node 16（ASUSTOR AS1002T，armv7l）
 //  - 即時同步：Server-Sent Events（/api/events），動作用 POST
-//  - 房間只存在記憶體中，重啟伺服器就清空
+//  - 房間（含聊天紀錄）只存在記憶體中，重啟伺服器就清空
 // =============================================================
 'use strict';
 
@@ -19,6 +19,10 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const SEAT_RELEASE_MS = 60 * 1000;
 // 房間沒人連線超過這個時間就刪除
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
+// 聊天室：每間房保留最近幾則、每則最多幾個字、同一人發言最短間隔
+const CHAT_HISTORY = 50;
+const CHAT_MAX_LEN = 200;
+const CHAT_MIN_INTERVAL_MS = 500;
 
 // 小九宮格內的連線（格子編號 0~8，由左到右、由上到下）
 const LINES = [
@@ -37,6 +41,9 @@ function newRoom(id) {
     first: 'X', // 本局先手
     lastActive: Date.now(),
     clients: new Set(), // { res, token }
+    chat: [], // { id, name, seat, text, at }
+    chatSeq: 0,
+    chatLastAt: new Map(), // token -> 上次發言時間（防洗版）
     ...freshGame('X'),
   };
 }
@@ -103,6 +110,10 @@ function broadcast(room) {
   }
 }
 
+function sendChat(client, payload) {
+  client.res.write(`event: chat\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
 // ---------- 遊戲動作 ----------
 
 function join(room, token, name) {
@@ -166,6 +177,27 @@ function restart(room, token) {
   return null;
 }
 
+function chat(room, token, name, text) {
+  text = String(text || '').replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_LEN);
+  if (!text) return '訊息不能是空的';
+  const now = Date.now();
+  if (now - (room.chatLastAt.get(token) || 0) < CHAT_MIN_INTERVAL_MS) return '說太快了，休息一下';
+  room.chatLastAt.set(token, now);
+
+  const seat = seatOf(room, token);
+  const msg = {
+    id: ++room.chatSeq,
+    name: (seat && room.seats[seat].name) || name || '觀戰者',
+    seat,
+    text,
+    at: now,
+  };
+  room.chat.push(msg);
+  if (room.chat.length > CHAT_HISTORY) room.chat.shift();
+  for (const c of room.clients) sendChat(c, { messages: [msg] });
+  return null;
+}
+
 function leave(room, token) {
   const mark = seatOf(room, token);
   if (mark) {
@@ -225,6 +257,7 @@ function handleEvents(req, res, url) {
 
   const client = { res, token };
   room.clients.add(client);
+  sendChat(client, { reset: true, messages: room.chat }); // 連上（或重連）時補上聊天紀錄
   const mark = seatOf(room, token);
   if (mark) {
     room.seats[mark].conns++;
@@ -264,7 +297,10 @@ async function handleAction(req, res, action) {
   else if (action === 'move') error = move(room, token, body.big, body.small);
   else if (action === 'restart') error = restart(room, token);
   else if (action === 'leave') error = leave(room, token);
-  else return sendJson(res, 404, { error: '未知的動作' });
+  else if (action === 'chat') {
+    error = chat(room, token, cleanName(body.name), body.text);
+    if (!error) return sendJson(res, 200, { ok: true }); // 聊天已單獨推送，不用重送棋盤
+  } else return sendJson(res, 404, { error: '未知的動作' });
 
   if (error) return sendJson(res, 409, { error });
   broadcast(room);
@@ -299,7 +335,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/api/events') return handleEvents(req, res, url);
   if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, rooms: rooms.size });
-  const m = url.pathname.match(/^\/api\/(join|move|restart|leave)$/);
+  const m = url.pathname.match(/^\/api\/(join|move|restart|leave|chat)$/);
   if (req.method === 'POST' && m) return handleAction(req, res, m[1]);
   if (req.method === 'GET') return serveStatic(req, res, url);
   sendJson(res, 405, { error: 'method not allowed' });
