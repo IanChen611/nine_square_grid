@@ -41,6 +41,7 @@ function newRoom(id) {
     first: 'X', // 本局先手
     lastActive: Date.now(),
     clients: new Set(), // { res, token }
+    viewers: new Map(), // token -> 暱稱（觀戰者，用來顯示名單與聊天名稱）
     chat: [], // { id, name, seat, text, at }
     chatSeq: 0,
     chatLastAt: new Map(), // token -> 上次發言時間（防洗版）
@@ -98,8 +99,20 @@ function publicState(room) {
     winLine: room.winLine,
     lastMove: room.lastMove,
     moveCount: room.moveCount,
-    spectators: [...room.clients].filter((c) => !seatOf(room, c.token)).length,
+    spectators: spectatorNames(room),
   };
+}
+
+// 目前在線、沒有座位的人（同一裝置開多個分頁只算一次）
+function spectatorNames(room) {
+  const seen = new Set();
+  const names = [];
+  for (const c of room.clients) {
+    if (seen.has(c.token) || seatOf(room, c.token)) continue;
+    seen.add(c.token);
+    names.push(room.viewers.get(c.token) || '觀戰者');
+  }
+  return names;
 }
 
 function broadcast(room) {
@@ -116,12 +129,14 @@ function sendChat(client, payload) {
 
 // ---------- 遊戲動作 ----------
 
-function join(room, token, name) {
+function join(room, token, name, watch) {
   const mine = seatOf(room, token);
   if (mine) {
     room.seats[mine].name = name || room.seats[mine].name;
     return mine;
   }
+  if (name) room.viewers.set(token, name);
+  if (watch) return null; // 選擇觀戰：就算有空位也不入座
   for (const mark of ['X', 'O']) {
     if (seatFree(room.seats[mark])) {
       const conns = [...room.clients].filter((c) => c.token === token).length;
@@ -187,7 +202,7 @@ function chat(room, token, name, text) {
   const seat = seatOf(room, token);
   const msg = {
     id: ++room.chatSeq,
-    name: (seat && room.seats[seat].name) || name || '觀戰者',
+    name: (seat && room.seats[seat].name) || room.viewers.get(token) || name || '觀戰者',
     seat,
     text,
     at: now,
@@ -201,6 +216,7 @@ function chat(room, token, name, text) {
 function leave(room, token) {
   const mark = seatOf(room, token);
   if (mark) {
+    room.viewers.set(token, room.seats[mark].name); // 離開座位後若留下來觀戰，沿用原本的暱稱
     room.seats[mark] = null;
     Object.assign(room, freshGame(room.first));
   }
@@ -293,7 +309,7 @@ async function handleAction(req, res, action) {
 
   let error = null;
   let extra = {};
-  if (action === 'join') extra.seat = join(room, token, cleanName(body.name));
+  if (action === 'join') extra.seat = join(room, token, cleanName(body.name), body.watch === true);
   else if (action === 'move') error = move(room, token, body.big, body.small);
   else if (action === 'restart') error = restart(room, token);
   else if (action === 'leave') error = leave(room, token);

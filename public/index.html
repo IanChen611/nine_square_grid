@@ -95,6 +95,9 @@
   .player .sub { font-size: .78rem; color: var(--muted); }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #9aa3b5; margin-right: 4px; }
   .dot.on { background: #2fbf71; }
+  .viewers { font-size: .85rem; color: var(--muted); margin: -2px 0 6px; text-align: center; overflow-wrap: anywhere; }
+  .viewers b { color: var(--text); font-weight: 600; }
+  .badge { display: inline-block; font-size: .8rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 
   .status { text-align: center; font-weight: 600; min-height: 1.5em; margin: 6px 0 10px; }
 
@@ -176,6 +179,7 @@
       <div class="row">
         <input id="code" maxlength="8" placeholder="房號" autocapitalize="characters" style="text-transform:uppercase">
         <button id="joinBtn" style="flex:0 0 auto">加入</button>
+        <button id="watchBtn" class="ghost" style="flex:0 0 auto">👀 觀戰</button>
       </div>
     </div>
     <div class="panel rules">
@@ -194,17 +198,20 @@
       <div class="share">
         房號 <code id="roomCode"></code>
         <button class="ghost" id="copy">複製邀請連結</button>
-        <span id="spectators" style="margin-left:auto"></span>
+        <button class="ghost" id="copyWatch">觀戰連結</button>
+        <span id="watching" class="badge hidden" style="margin-left:auto">👀 觀戰中</span>
       </div>
       <div class="players">
         <div class="player X" id="pX"></div>
         <div class="player O" id="pO"></div>
       </div>
+      <div class="viewers hidden" id="viewers"></div>
       <div class="status" id="status"></div>
       <div class="board" id="board"></div>
       <div class="actions">
         <button id="restart" class="ghost">重新開始</button>
         <button id="sit" class="ghost hidden">入座</button>
+        <button id="toWatch" class="ghost hidden">改為觀戰</button>
         <button id="flip" class="ghost" aria-pressed="false">⇄ 圈叉互換</button>
         <button id="leave" class="ghost">離開房間</button>
       </div>
@@ -243,6 +250,7 @@
 
   var params = new URLSearchParams(location.search);
   var roomId = (params.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var watch = params.get('watch') === '1'; // 選擇觀戰：不自動入座
   var mySeat = null;
   var flip = store('nsg-flip') === '1'; // 圈叉互換：只改顯示，伺服器仍用原本的 X / O
   var state = null;
@@ -285,18 +293,27 @@
     return s;
   }
 
-  function goRoom(code) {
+  function goRoom(code, asViewer) {
     var name = $('name').value.trim();
     if (!name) { toast('先輸入暱稱'); $('name').focus(); return; }
     store('nsg-name', name);
-    location.search = '?room=' + code;
+    location.search = '?room=' + code + (asViewer ? '&watch=1' : '');
+  }
+
+  function lobbyCode() {
+    var code = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!code) toast('請輸入房號');
+    return code;
   }
 
   $('create').onclick = function () { goRoom(randomCode()); };
   $('joinBtn').onclick = function () {
-    var code = $('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (!code) { toast('請輸入房號'); return; }
-    goRoom(code);
+    var code = lobbyCode();
+    if (code) goRoom(code);
+  };
+  $('watchBtn').onclick = function () {
+    var code = lobbyCode();
+    if (code) goRoom(code, true);
   };
   $('code').onkeydown = function (e) { if (e.key === 'Enter') $('joinBtn').click(); };
 
@@ -318,10 +335,18 @@
   }
 
   function sit(name) {
-    return api('join', { name: name || store('nsg-name') || '' }).then(function (r) {
+    return api('join', { name: name || store('nsg-name') || '', watch: watch }).then(function (r) {
       mySeat = r.seat;
-      if (!mySeat) toast('目前沒有空位，先觀戰（離線玩家的座位保留 1 分鐘）');
+      if (watch && !mySeat) toast('你正在觀戰，可以使用聊天室');
+      else if (!mySeat) toast('目前沒有空位，先觀戰（離線玩家的座位保留 1 分鐘）');
     }).catch(function (e) { toast(e.message); });
+  }
+
+  // 網址上記住是否為觀戰模式，重新整理後維持一樣的身分
+  function setWatch(on) {
+    watch = on;
+    var q = '?room=' + roomId + (on ? '&watch=1' : '');
+    history.replaceState(null, '', location.pathname + q);
   }
 
   function connect() {
@@ -395,7 +420,12 @@
       el.innerHTML = playerHtml(m);
       el.classList.toggle('turn', !st.winner && st.turn === m && !!st.seats.X && !!st.seats.O);
     });
-    $('spectators').textContent = st.spectators ? '觀戰 ' + st.spectators + ' 人' : '';
+    var viewers = st.spectators || [];
+    $('viewers').classList.toggle('hidden', !viewers.length);
+    $('viewers').innerHTML = '👀 觀戰 ' + viewers.length + ' 人：' + viewers.map(function (n) {
+      return '<b>' + escapeHtml(n) + '</b>';
+    }).join('、');
+    $('watching').classList.toggle('hidden', !!mySeat);
 
     var ready = st.seats.X && st.seats.O;
     var myTurn = ready && !st.winner && mySeat === st.turn;
@@ -417,7 +447,7 @@
 
     var msg;
     if (!ready) {
-      msg = '等待另一位玩家加入…把房號或邀請連結傳給朋友';
+      msg = mySeat ? '等待另一位玩家加入…把房號或邀請連結傳給朋友' : '等待玩家入座…';
     } else if (st.winner === 'draw') {
       msg = '平手！棋盤下滿了';
     } else if (st.winner) {
@@ -434,7 +464,8 @@
     $('restart').textContent = st.winner ? '再來一局' : '重新開始';
     var canSit = !mySeat && (!st.seats.X || !st.seats.O || !st.seats.X.online || !st.seats.O.online);
     $('sit').classList.toggle('hidden', !canSit);
-    $('leave').textContent = mySeat ? '離開座位' : '回大廳';
+    $('toWatch').classList.toggle('hidden', !mySeat);
+    $('leave').textContent = mySeat ? '離開房間' : '回大廳';
   }
 
   $('flip').onclick = function () {
@@ -450,24 +481,35 @@
     if (state && !state.winner && state.moveCount > 0 && !confirm('這局還沒結束，確定要重新開始？')) return;
     api('restart').catch(function (e) { toast(e.message); });
   };
-  $('sit').onclick = function () { sit().then(function () { if (state) render(); }); };
+  $('sit').onclick = function () {
+    setWatch(false);
+    sit().then(function () { if (state) render(); });
+  };
+  $('toWatch').onclick = function () {
+    if (state && !state.winner && state.moveCount > 0 && !confirm('改為觀戰會讓出座位，這局會重置，確定嗎？')) return;
+    api('leave').then(function () {
+      setWatch(true);
+      toast('已改為觀戰，座位讓給其他人');
+    }, function (e) { toast(e.message); });
+  };
   $('leave').onclick = function () {
     if (mySeat) {
-      if (!confirm('確定要離開座位？（這局會重置）')) return;
+      if (!confirm('確定要離開房間？（會讓出座位，這局會重置）')) return;
       api('leave').finally(function () { location.search = ''; });
     } else {
       location.search = '';
     }
   };
-  $('copy').onclick = function () {
-    var link = location.origin + location.pathname + '?room=' + roomId;
+  function copyLink(link) {
     var done = function () { toast('已複製：' + link); };
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(link).then(done, function () { prompt('複製這個連結：', link); });
     } else {
       prompt('複製這個連結：', link);
     }
-  };
+  }
+  $('copy').onclick = function () { copyLink(location.origin + location.pathname + '?room=' + roomId); };
+  $('copyWatch').onclick = function () { copyLink(location.origin + location.pathname + '?room=' + roomId + '&watch=1'); };
 
   // ---------- 聊天室 ----------
   var chatIds = {};
