@@ -101,6 +101,30 @@
 
   .status { text-align: center; font-weight: 600; min-height: 1.5em; margin: 6px 0 10px; }
 
+  /* 結果字樣：比一般狀態列大；自己贏時用金色漸層 + 彈出動畫 */
+  .status.result { font-size: clamp(1.5rem, 6vw, 2.2rem); font-weight: 800; line-height: 1.25; margin: 8px 0 12px; }
+  .status.result.lose { font-size: clamp(1.15rem, 4.5vw, 1.5rem); color: var(--muted); }
+  .status.result.win { font-size: clamp(2rem, 9vw, 3rem); }
+  .status .glow {
+    background: linear-gradient(90deg, #f5a623, #ffd84d, #f5a623); background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shine 2.4s linear infinite;
+  }
+  .status .emoji { display: inline-block; margin: 0 .15em; }
+  .status.pop { animation: pop .6s cubic-bezier(.2, 1.6, .4, 1) both; }
+  .status.pop .emoji { animation: wiggle .9s ease-in-out .3s 2; }
+  @keyframes pop { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes shine { to { background-position: -200% 0; } }
+  @keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-15deg); } 75% { transform: rotate(15deg); } }
+
+  /* 彩帶：只有自己贏時灑一次，約 3 秒後移除 */
+  .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
+  .confetti i {
+    position: absolute; top: -12px; width: 8px; height: 14px; border-radius: 2px;
+    animation: fall linear forwards;
+  }
+  @keyframes fall { to { transform: translate3d(var(--dx), 105vh, 0) rotate(var(--rot)); } }
+
   /* 棋盤 */
   .board {
     width: min(100%, 560px); aspect-ratio: 1; margin: 0 auto;
@@ -122,7 +146,8 @@
   .cell.X { color: var(--x); }
   .cell.O { color: var(--o); }
   .cell.last { box-shadow: inset 0 0 0 3px currentColor; }
-  .cell.win { background: var(--win) !important; }
+  .cell.win { background: var(--win) !important; animation: winPulse 1s ease-in-out 3; }
+  @keyframes winPulse { 50% { transform: scale(1.12); } }
   .cell:disabled { opacity: 1; }
 
   .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
@@ -161,6 +186,11 @@
     #game { display: grid; grid-template-columns: minmax(0, 600px) 300px; gap: 16px; justify-content: center; }
     .chat { margin: 0; display: flex; flex-direction: column; min-height: 320px; }
     .chat-list { flex: 1 1 auto; height: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status.pop, .status.pop .emoji, .status .glow, .cell.win { animation: none; }
+    .confetti { display: none; }
   }
 </style>
 </head>
@@ -255,6 +285,7 @@
   var flip = store('nsg-flip') === '1'; // 圈叉互換：只改顯示，伺服器仍用原本的 X / O
   var state = null;
   var es = null;
+  var prevWinner; // 上一次 render 的 winner；undefined = 還沒 render 過（剛進房就已結束的局不播動畫）
 
   function toast(msg) {
     var t = $('toast');
@@ -411,6 +442,26 @@
     });
   }
 
+  // 灑一次彩帶：純 CSS transform 動畫，結束後整個移除，不留負擔
+  function confetti() {
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var colors = ['#f5a623', '#ffd84d', '#2f6fed', '#e5484d', '#2fbf71', '#b06cff'];
+    var box = document.createElement('div');
+    box.className = 'confetti';
+    for (var i = 0; i < 36; i++) {
+      var p = document.createElement('i');
+      p.style.left = Math.random() * 100 + '%';
+      p.style.background = colors[i % colors.length];
+      p.style.setProperty('--dx', (Math.random() * 160 - 80) + 'px');
+      p.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
+      p.style.animationDuration = (1.8 + Math.random() * 1.2) + 's';
+      p.style.animationDelay = Math.random() * 0.4 + 's';
+      box.appendChild(p);
+    }
+    document.body.appendChild(box);
+    setTimeout(function () { box.remove(); }, 3600);
+  }
+
   function render() {
     var st = state;
     mySeat = st.you; // 以伺服器為準（座位可能被讓出或換人）
@@ -445,20 +496,40 @@
       }
     }
 
-    var msg;
+    var msg, html = null, kind = '';
     if (!ready) {
       msg = mySeat ? '等待另一位玩家加入…把房號或邀請連結傳給朋友' : '等待玩家入座…';
     } else if (st.winner === 'draw') {
-      msg = '平手！棋盤下滿了';
+      msg = '平手！棋盤下滿了'; kind = 'draw';
     } else if (st.winner) {
       var wname = st.seats[st.winner].name;
-      msg = st.winner === mySeat ? '🎉 你贏了！' : mySeat ? '你輸了，' + wname + ' 獲勝' : wname + '（' + shown(st.winner) + '）獲勝！';
+      if (st.winner === mySeat) {
+        kind = 'win';
+        html = '<span class="emoji">🎉</span><span class="glow">你贏了！</span><span class="emoji">🏆</span>';
+      } else if (mySeat) {
+        kind = 'lose'; msg = '你輸了，' + wname + ' 獲勝';
+      } else {
+        kind = 'other';
+        html = '<span class="emoji">🏆</span>' + escapeHtml(wname) + '（' + shown(st.winner) + '）獲勝！';
+      }
     } else {
       var where = st.forced === null ? '任一大格' : '「' + POS[st.forced] + '」大格';
       if (myTurn) msg = '輪到你了，請下在' + where;
       else msg = st.seats[st.turn].name + '（' + shown(st.turn) + '）思考中… 要下在' + where;
     }
-    $('status').textContent = msg;
+    var status = $('status');
+    if (html) status.innerHTML = html; else status.textContent = msg;
+    status.classList.toggle('result', !!kind);
+    ['win', 'lose', 'draw', 'other'].forEach(function (k) { status.classList.toggle(k, kind === k); });
+    if (!kind) status.classList.remove('pop');
+    // 只在「這一局剛結束」時播一次動畫，聊天或重連造成的重繪不會重播
+    if (kind && prevWinner === null) {
+      status.classList.remove('pop');
+      void status.offsetWidth; // 強制重排，讓動畫可以重新開始
+      status.classList.add('pop');
+      if (kind === 'win') confetti();
+    }
+    prevWinner = st.winner || null;
 
     $('restart').classList.toggle('hidden', !mySeat);
     $('restart').textContent = st.winner ? '再來一局' : '重新開始';
